@@ -57,6 +57,7 @@ WATCHOS_MIN_SDK_VERSION="6.0"
 TVOS_MIN_SDK_VERSION="14.0"
 
 # Init optional env variables (use available variable or default to empty string)
+# Is there an issue here?
 CURL_OPTIONS="${CURL_OPTIONS:-}"
 CONFIG_OPTIONS="${CONFIG_OPTIONS:-}"
 
