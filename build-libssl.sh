@@ -25,7 +25,7 @@ set -u
 # SCRIPT DEFAULTS
 
 # Default version in case no version is specified
-DEFAULTVERSION="1.1.1k"
+DEFAULTVERSION="1.1.1w"
 
 # no-comp: against CRIME attack
 # no-shared: openssl-cli needs static link
