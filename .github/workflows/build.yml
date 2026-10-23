@@ -1,87 +1,93 @@
 name: CI
-
 on:
+  pull_request:
+    paths-ignore:
+      - '**.md'
+  workflow_dispatch:
   push:
     tags:
-    - 'v*'
-
+      - 'v*'
+permissions:
+  contents: read
+defaults:
+  run:
+    shell: bash
 jobs:
   build:
-    name: Building release assets
-    runs-on: macOS-latest
-
+    name: Building xcframeworks
+    runs-on: macos-26
+    timeout-minutes: 120
     steps:
-    - uses: actions/checkout@v2
-
-    - name: xcode-select
-      run: sudo xcode-select -s /Applications/Xcode.app
-
-    - name: build-openssl
-      run: swift run
-
-    - name: Create Release
-      id: create_release
-      uses: actions/create-release@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        tag_name: ${{ github.ref }}
-        release_name: Release ${{ github.ref }}
-        body_path: release.md
-        draft: false
-        prerelease: false
-
-    - name: Upload Release Asset Dynamic
-      id: upload-release-asset-dynamic
-      uses: actions/upload-release-asset@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        upload_url: ${{ steps.create_release.outputs.upload_url }} 
-        asset_path: ./openssl-dynamic.xcframework.zip
-        asset_name: openssl-dynamic.xcframework.zip
-        asset_content_type: application/zip
-
-    - name: Upload Release Asset Static
-      id: upload-release-asset-static 
-      uses: actions/upload-release-asset@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        upload_url: ${{ steps.create_release.outputs.upload_url }} 
-        asset_path: ./openssl-static.xcframework.zip
-        asset_name: openssl-static.xcframework.zip
-        asset_content_type: application/zip
-
-    - name: Upload Libs
-      id: upload-release-asset-libs 
-      uses: actions/upload-release-asset@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: ./openssl-libs.zip
-        asset_name: openssl-libs.zip
-        asset_content_type: application/zip
-
-    - name: Upload Dynamic Frameworks
-      id: upload-release-asset-dynamic-frameworks
-      uses: actions/upload-release-asset@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        upload_url: ${{ steps.create_release.outputs.upload_url }}
-        asset_path: ./openssl-dynamic.frameworks.zip
-        asset_name: openssl-dynamic.frameworks.zip
-        asset_content_type: application/zip
-
-    - name: Upload Static Frameworks
-      id: upload-release-asset-static-frameworkds
-      uses: actions/upload-release-asset@v1
-      env:
-        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-      with:
-        upload_url: ${{ steps.create_release.outputs.upload_url }} 
-        asset_path: ./openssl-static.frameworks.zip
-        asset_name: openssl-static.frameworks.zip
-        asset_content_type: application/zip
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+      - name: Toolchain
+        run: |
+          xcodebuild -version
+          df -h .
+      - name: Build frameworks
+        run: swift run --verbose
+      - name: Slices and checksums
+        run: |
+          for zip in openssl-*.zip; do
+            sum=$(swift package compute-checksum "$zip")
+            echo "$sum  $zip"
+          done | tee checksums.txt
+          {
+            echo '| xcframework | slice | archs |'
+            echo '| --- | --- | --- |'
+            for kind in static dynamic; do
+              xcf="xcframeworks/$kind/openssl.xcframework"
+              plutil -convert json -o - "$xcf/Info.plist" | jq -e '
+                [.AvailableLibraries[] | {id: .LibraryIdentifier, archs: (.SupportedArchitectures | sort)}] | sort_by(.id) ==
+                [{id: "ios-arm64", archs: ["arm64"]}, {id: "ios-arm64_x86_64-simulator", archs: ["arm64", "x86_64"]}]' >/dev/null
+              plutil -convert json -o - "$xcf/Info.plist" | jq -r \
+                '.AvailableLibraries[] | [.LibraryIdentifier, .LibraryPath, (.SupportedArchitectures | sort | join(" "))] | @tsv' \
+                | while IFS=$'\t' read -r slice lib expected; do
+                    bin="$xcf/$slice/$lib/openssl"
+                    archs=$(lipo -archs "$bin")
+                    actual=$(echo "$archs" | tr ' ' '\n' | sort | paste -sd ' ' -)
+                    [ "$actual" = "$expected" ] || exit 1
+                    echo "| openssl-$kind | $slice | $archs |"
+                    if [ "$kind" = dynamic ]; then
+                      otool -L "$bin" >&2
+                      if otool -L "$bin" | grep $'^\t' | grep -E '/opt/homebrew|/usr/local|/Users/runner'; then exit 1; fi
+                    fi
+                  done
+            done
+          } | tee -a "$GITHUB_STEP_SUMMARY"
+          du -sh bin src frameworks xcframeworks .build
+          df -h .
+      - uses: actions/upload-artifact@v7
+        with:
+          name: xcframeworks
+          include-hidden-files: true
+          if-no-files-found: error
+          path: |
+            openssl-*.zip
+            checksums.txt
+            release.md
+  release:
+    name: Publishing release
+    needs: build
+    if: startsWith(github.ref, 'refs/tags/v') && github.repository == 'holzschu/openssl-apple'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/download-artifact@v8
+        with:
+          name: xcframeworks
+          path: dist
+      - name: Create Release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
+              dist/openssl-*.zip dist/checksums.txt
+          else
+            gh release create "$GITHUB_REF_NAME" --repo "$GITHUB_REPOSITORY" \
+              --verify-tag --title "Release $GITHUB_REF_NAME" --notes-file dist/release.md \
+              dist/openssl-*.zip dist/checksums.txt
+          fi

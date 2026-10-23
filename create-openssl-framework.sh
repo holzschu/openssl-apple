@@ -150,7 +150,7 @@ if [ $FWTYPE == "dynamic" ]; then
             MIN_SDK="-platform_version mac-catalyst 14.0 $MIN_SDK_VERSION"
             PLATFORM="MacOSX"
         elif [[ $PLATFORM == iPhoneSimulator* ]]; then
-            MIN_SDK="-ios_simulator_version_min $MIN_SDK_VERSION"
+            MIN_SDK="-platform_version ios-simulator $MIN_SDK_VERSION $SDKVERSION"
         elif [[ $PLATFORM == WatchOS* ]]; then
             MIN_SDK="-watchos_version_min $MIN_SDK_VERSION"
         elif [[ $PLATFORM == WatchSimulator* ]]; then
@@ -176,7 +176,6 @@ if [ $FWTYPE == "dynamic" ]; then
 
         ld obj/*.o \
             -dylib \
-            -bitcode_bundle \
             -lSystem \
             -arch $ARCH \
             $MIN_SDK \
