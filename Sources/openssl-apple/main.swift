@@ -3,7 +3,7 @@ import FMake
 
 OutputLevel.default = .error
 
-try sh("./build-libssl.sh")
+try sh("./build-libssl.sh --disable-bitcode --verbose-on-error --targets=\"ios64-cross-arm64 ios-sim-cross-arm64 ios-sim-cross-x86_64\"")
 
 try sh("./create-openssl-framework.sh static")
 

@@ -56,7 +56,7 @@ TVOS_MIN_SDK_VERSION="14.0"
 
 # Init optional env variables (use available variable or default to empty string)
 # Is there an issue here?
-CURL_OPTIONS="${CURL_OPTIONS:-}"
+CURL_OPTIONS="${CURL_OPTIONS:---fail --location --retry 3}"
 CONFIG_OPTIONS="${CONFIG_OPTIONS:-}"
 
 echo_help()
@@ -487,10 +487,14 @@ if [ ! -e ${OPENSSL_ARCHIVE_FILE_NAME} ]; then
 
   # Archive was found, so proceed with download.
   # -O Use server-specified filename for download
-  curl ${CURL_OPTIONS} -O "${OPENSSL_ARCHIVE_URL}"
+  curl ${CURL_OPTIONS} -O "${OPENSSL_ARCHIVE_URL}" || exit 1
 
 else
   echo "Using ${OPENSSL_ARCHIVE_FILE_NAME}"
+fi
+
+if [ "${VERSION}" = "1.1.1w" ]; then
+  echo "cf3098950cb4d853ad95c0841f1f9c6d3dc102dccfcacd521d93925208b76ac8  ${OPENSSL_ARCHIVE_FILE_NAME}" | shasum -a 256 -c - || exit 1
 fi
 
 # Set reference to custom configuration (OpenSSL 1.1.1)
